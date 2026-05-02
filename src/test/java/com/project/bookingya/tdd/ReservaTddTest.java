@@ -1,455 +1,264 @@
 package com.project.bookingya.tdd;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.modelmapper.Conditions;
+import org.modelmapper.ModelMapper;
+import org.modelmapper.convention.MatchingStrategies;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.project.bookingya.dtos.GuestDto;
 import com.project.bookingya.dtos.ReservationDto;
-import com.project.bookingya.dtos.RoomDto;
+import com.project.bookingya.entities.GuestEntity;
+import com.project.bookingya.entities.ReservationEntity;
+import com.project.bookingya.entities.RoomEntity;
+import com.project.bookingya.exceptions.BusinessRuleException;
+import com.project.bookingya.exceptions.EntityNotExistsException;
+import com.project.bookingya.models.Reservation;
+import com.project.bookingya.repositories.IGuestRepository;
+import com.project.bookingya.repositories.IReservationRepository;
+import com.project.bookingya.repositories.IRoomRepository;
+import com.project.bookingya.services.ReservationService;
 import com.project.bookingya.shared.Constants;
 
-@SpringBootTest
-@AutoConfigureMockMvc
+@ExtendWith(MockitoExtension.class)
 public class ReservaTddTest {
 
-    @Autowired
-    private MockMvc mockMvc;
+    @Mock
+    private IReservationRepository reservationRepository;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    @Mock
+    private IRoomRepository roomRepository;
 
-    @Test
-    void crearReservaConExito() throws Exception {
-        UUID roomId = crearHabitacionParaConsultarReservaPorId();
-        UUID guestId = crearHuespedParaConsultarReservaPorId();
+    @Mock
+    private IGuestRepository guestRepository;
 
-        // Crea una reserva
-        ReservationDto reservation = new ReservationDto();
-        reservation.setRoomId(roomId);
-        reservation.setGuestId(guestId);
-        reservation.setCheckIn(LocalDateTime.of(2026, 5, 10, 14, 0));
-        reservation.setCheckOut(LocalDateTime.of(2026, 5, 12, 11, 0));
-        reservation.setGuestsCount(2);
-        reservation.setNotes("Reserva creada desde metodo crear reserva con Exito");
+    private ReservationService reservationService;
 
-        // Valida los datos creados de la reserva
-        String reservationResponse = mockMvc.perform(post("/reservation")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(reservation)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andExpect(jsonPath("$.roomId").value(roomId.toString()))
-                .andExpect(jsonPath("$.guestId").value(guestId.toString()))
-                .andExpect(jsonPath("$.guestsCount").value(2))
-                .andExpect(jsonPath("$.notes").value("Reserva creada desde metodo crear reserva con Exito"))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(reservationResponse);
-    }
-
-
-    @Test
-    void obtenerReservaPorId() throws Exception {
-        UUID roomId = crearHabitacionParaConsultarReservaPorId();
-        UUID guestId = crearHuespedParaConsultarReservaPorId();
-        UUID reservationId = crearReservaParaConsultarReservaPorId(roomId, guestId);
-
-        // Consulta una reserva por ID
-        String reservationResponse = mockMvc.perform(get("/reservation/{id}", reservationId)
-                        .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(reservationId.toString()))
-                .andExpect(jsonPath("$.roomId").value(roomId.toString()))
-                .andExpect(jsonPath("$.guestId").value(guestId.toString()))
-                .andExpect(jsonPath("$.guestsCount").value(2))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(reservationResponse);
-    }
-
-    private UUID crearHabitacionParaConsultarReservaPorId() throws Exception {
-        String unique = String.valueOf(System.currentTimeMillis());
-
-
-        RoomDto room = new RoomDto();
-        room.setCode("ROOM" + unique);
-        room.setName("Habitacion" + unique);
-        room.setCity("Bogota");
-        room.setMaxGuests(4);
-        room.setNightlyPrice(new BigDecimal("180000"));
-        room.setAvailable(true);
-
-        String roomResponse = mockMvc.perform(post("/room")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(room)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(roomResponse);
-        return extractId(roomResponse);
-    }
-
-    private UUID crearHuespedParaConsultarReservaPorId() throws Exception {
-        String unique = String.valueOf(System.currentTimeMillis());
-
-        GuestDto guest = new GuestDto();
-        guest.setIdentification("ID" + unique);
-        guest.setName("Huesped" + unique);
-        guest.setEmail("huesped" + unique + "@example.com");
-
-        String guestResponse = mockMvc.perform(post("/guest")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(guest)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(guestResponse);
-        return extractId(guestResponse);
-    }
-
-    private UUID crearReservaParaConsultarReservaPorId(UUID roomId, UUID guestId) throws Exception {
-        ReservationDto reservation = new ReservationDto();
-        reservation.setRoomId(roomId);
-        reservation.setGuestId(guestId);
-        reservation.setCheckIn(LocalDateTime.of(2026, 6, 10, 14, 0));
-        reservation.setCheckOut(LocalDateTime.of(2026, 6, 12, 11, 0));
-        reservation.setGuestsCount(2);
-        reservation.setNotes("Reserva para obtener por ID");
-
-        String reservationResponse = mockMvc.perform(post("/reservation")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(reservation)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(reservationResponse);
-        return extractId(reservationResponse);
-    }
-    private UUID extractId(String json) throws Exception {
-        return UUID.fromString(objectMapper.readTree(json).get("id").asText());
+    @BeforeEach
+    void configurarPrueba() {
+        reservationService = new ReservationService(
+                reservationRepository,
+                roomRepository,
+                guestRepository,
+                crearModelMapper()
+        );
     }
 
     @Test
-    void actualizarReserva() throws Exception {
-        UUID roomId = crearHabitacionParaActualizar();
-        UUID guestId = crearHuespedParaActualizar();
-        UUID reservationId = crearReservaParaActualizar(roomId, guestId);
+    void crearReservaConExito() {
+        UUID habitacionId = UUID.randomUUID();
+        UUID huespedId = UUID.randomUUID();
+        ReservationDto reserva = crearReservaDto(habitacionId, huespedId);
+        ReservationEntity reservaGuardada = crearReservaEntity(UUID.randomUUID(), reserva);
 
-        // Actualiza los datos de una reserva existente en este caso, fechas de ingreso y salida y cantidad de huespedes
-        ReservationDto reservationUpdate = new ReservationDto();
-        reservationUpdate.setRoomId(roomId);
-        reservationUpdate.setGuestId(guestId);
-        reservationUpdate.setCheckIn(LocalDateTime.of(2026, 6, 25, 7, 0));
-        reservationUpdate.setCheckOut(LocalDateTime.of(2026, 6, 30, 19, 0));
-        reservationUpdate.setGuestsCount(4);
-        reservationUpdate.setNotes("Reserva creada para actualizar");
-        String reservationResponse = mockMvc.perform(put("/reservation/{id}", reservationId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(reservationUpdate)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(reservationId.toString()))
-                .andExpect(jsonPath("$.roomId").value(roomId.toString()))
-                .andExpect(jsonPath("$.guestId").value(guestId.toString()))
-                .andExpect(jsonPath("$.guestsCount").value(4))
-                .andExpect(jsonPath("$.notes").value("Reserva creada para actualizar"))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+        prepararHabitacionYHuespedExistentes(habitacionId, huespedId, true, 4);
+        prepararSinCrucesDeReserva(reserva, null);
+        when(reservationRepository.saveAndFlush(any(ReservationEntity.class))).thenReturn(reservaGuardada);
 
-        imprimirRespuesta(reservationResponse);
-    }
+        Reservation respuesta = reservationService.create(reserva);
 
-    private UUID crearHabitacionParaActualizar() throws Exception {
-        String unique = String.valueOf(System.currentTimeMillis());
+        assertNotNull(respuesta.getId());
+        assertEquals(habitacionId, respuesta.getRoomId());
+        assertEquals(huespedId, respuesta.getGuestId());
+        assertEquals(reserva.getGuestsCount(), respuesta.getGuestsCount());
+        assertEquals(reserva.getNotes(), respuesta.getNotes());
 
-        RoomDto room = new RoomDto();
-        room.setCode("ROOM" + unique);
-        room.setName("Habitacion" + unique);
-        room.setCity("Bogota");
-        room.setMaxGuests(4);
-        room.setNightlyPrice(new BigDecimal("180000"));
-        room.setAvailable(true);
-
-        String roomResponse = mockMvc.perform(post("/room")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(room)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(roomResponse);
-        return extractId(roomResponse);
-    }
-
-    private UUID crearHuespedParaActualizar() throws Exception {
-        String unique = String.valueOf(System.currentTimeMillis());
-
-        GuestDto guest = new GuestDto();
-        guest.setIdentification("ID" + unique);
-        guest.setName("Huesped" + unique);
-        guest.setEmail("huesped" + unique + "@example.com");
-
-        String guestResponse = mockMvc.perform(post("/guest")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(guest)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(guestResponse);
-        return extractId(guestResponse);
-    }
-
-    private UUID crearReservaParaActualizar(UUID roomId, UUID guestId) throws Exception {
-        ReservationDto reservation = new ReservationDto();
-        reservation.setRoomId(roomId);
-        reservation.setGuestId(guestId);
-        reservation.setCheckIn(LocalDateTime.of(2026, 6, 10, 14, 0));
-        reservation.setCheckOut(LocalDateTime.of(2026, 6, 12, 11, 0));
-        reservation.setGuestsCount(2);
-        reservation.setNotes("Reserva para Actualizar");
-
-        String reservationResponse = mockMvc.perform(post("/reservation")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(reservation)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(reservationResponse);
-        return extractId(reservationResponse);
+        verify(reservationRepository).saveAndFlush(any(ReservationEntity.class));
     }
 
     @Test
-    void eliminarReserva() throws Exception {
-        UUID roomId = crearHabitacionParaEliminar();
-        UUID guestId = crearHuespedParaEliminar();
-        UUID reservationId = crearReservaParaEliminar(roomId, guestId);
+    void obtenerReservaPorId() {
+        UUID reservaId = UUID.randomUUID();
+        ReservationDto reserva = crearReservaDto(UUID.randomUUID(), UUID.randomUUID());
+        ReservationEntity reservaEncontrada = crearReservaEntity(reservaId, reserva);
 
-        //Elimina una reserva existente o cancela
-        int deleteStatus = mockMvc.perform(delete("/reservation/{id}", reservationId)
-                        .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getStatus();
+        when(reservationRepository.findById(reservaId)).thenReturn(Optional.of(reservaEncontrada));
 
-        imprimirRespuesta("status " + deleteStatus);
+        Reservation respuesta = reservationService.getById(reservaId);
+
+        assertEquals(reservaId, respuesta.getId());
+        assertEquals(reserva.getRoomId(), respuesta.getRoomId());
+        assertEquals(reserva.getGuestId(), respuesta.getGuestId());
+        verify(reservationRepository).findById(reservaId);
     }
 
     @Test
-    void reservaNoEncontrada() throws Exception {
-        UUID reservationId = UUID.randomUUID();
+    void consultarReservas() {
+        UUID reservaId = UUID.randomUUID();
+        ReservationDto reserva = crearReservaDto(UUID.randomUUID(), UUID.randomUUID());
+        ReservationEntity reservaEncontrada = crearReservaEntity(reservaId, reserva);
 
-        String reservationResponse = mockMvc.perform(get("/reservation/{id}", reservationId)
-                        .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value(Constants.RESERVATION_NOT_FOUND))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+        when(reservationRepository.findAll()).thenReturn(List.of(reservaEncontrada));
 
-        imprimirRespuesta(reservationResponse);
+        List<Reservation> respuesta = reservationService.getAll();
+
+        assertEquals(1, respuesta.size());
+        assertEquals(reservaId, respuesta.get(0).getId());
+        assertEquals(reserva.getRoomId(), respuesta.get(0).getRoomId());
+        assertEquals(reserva.getGuestId(), respuesta.get(0).getGuestId());
+
+        verify(reservationRepository).findAll();
     }
 
     @Test
-    void huespedConReservaEnElMismoRangoDeFechas() throws Exception {
-        UUID firstRoomId = crearHabitacionParaReservaConHuespedOcupado();
-        UUID secondRoomId = crearHabitacionParaReservaConHuespedOcupado();
-        UUID guestId = crearHuespedParaReservaConHuespedOcupado();
+    void actualizarReserva() {
+        UUID reservaId = UUID.randomUUID();
+        UUID habitacionId = UUID.randomUUID();
+        UUID huespedId = UUID.randomUUID();
+        ReservationDto datosActualizados = crearReservaDto(habitacionId, huespedId);
+        datosActualizados.setGuestsCount(3);
+        datosActualizados.setNotes("Reserva actualizada desde TDD puro");
 
-        crearReservaBaseParaHuespedOcupado(firstRoomId, guestId);
+        ReservationEntity reservaExistente = crearReservaEntity(reservaId, crearReservaDto(habitacionId, huespedId));
+        ReservationEntity reservaActualizada = crearReservaEntity(reservaId, datosActualizados);
 
-        ReservationDto reservation = new ReservationDto();
-        reservation.setRoomId(secondRoomId);
-        reservation.setGuestId(guestId);
-        reservation.setCheckIn(LocalDateTime.of(2026, 7, 10, 14, 0));
-        reservation.setCheckOut(LocalDateTime.of(2026, 7, 12, 11, 0));
-        reservation.setGuestsCount(2);
-        reservation.setNotes("Reserva cruzada para el mismo huesped");
+        when(reservationRepository.findById(reservaId)).thenReturn(Optional.of(reservaExistente));
+        prepararHabitacionYHuespedExistentes(habitacionId, huespedId, true, 4);
+        prepararSinCrucesDeReserva(datosActualizados, reservaId);
+        when(reservationRepository.saveAndFlush(reservaExistente)).thenReturn(reservaActualizada);
 
-        String reservationResponse = mockMvc.perform(post("/reservation")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(reservation)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(Constants.RESERVATION_OVERLAP_GUEST))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+        Reservation respuesta = reservationService.update(datosActualizados, reservaId);
 
-        imprimirRespuesta(reservationResponse);
+        assertEquals(reservaId, respuesta.getId());
+        assertEquals(3, respuesta.getGuestsCount());
+        assertEquals("Reserva actualizada desde TDD puro", respuesta.getNotes());
+
+        verify(reservationRepository).findById(reservaId);
+        verify(reservationRepository).saveAndFlush(reservaExistente);
     }
 
-    private UUID crearHabitacionParaEliminar() throws Exception {
-        String unique = String.valueOf(System.currentTimeMillis());
+    @Test
+    void eliminarReserva() {
+        UUID reservaId = UUID.randomUUID();
+        ReservationEntity reserva = crearReservaEntity(
+                reservaId,
+                crearReservaDto(UUID.randomUUID(), UUID.randomUUID())
+        );
 
-        RoomDto room = new RoomDto();
-        room.setCode("ROOM" + unique);
-        room.setName("Habitacion" + unique);
-        room.setCity("Bogota");
-        room.setMaxGuests(4);
-        room.setNightlyPrice(new BigDecimal("180000"));
-        room.setAvailable(true);
+        when(reservationRepository.findById(reservaId)).thenReturn(Optional.of(reserva));
 
-        String roomResponse = mockMvc.perform(post("/room")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(room)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+        reservationService.delete(reservaId);
 
-        imprimirRespuesta(roomResponse);
-        return extractId(roomResponse);
+        verify(reservationRepository).findById(reservaId);
+        verify(reservationRepository).delete(reserva);
+        verify(reservationRepository).flush();
     }
 
-    private UUID crearHuespedParaEliminar() throws Exception {
-        String unique = String.valueOf(System.currentTimeMillis());
+    @Test
+    void reservaNoEncontrada() {
+        UUID reservaId = UUID.randomUUID();
+        when(reservationRepository.findById(reservaId)).thenReturn(Optional.empty());
 
-        GuestDto guest = new GuestDto();
-        guest.setIdentification("ID" + unique);
-        guest.setName("Huesped" + unique);
-        guest.setEmail("huesped" + unique + "@example.com");
+        EntityNotExistsException excepcion = assertThrows(
+                EntityNotExistsException.class,
+                () -> reservationService.getById(reservaId)
+        );
 
-        String guestResponse = mockMvc.perform(post("/guest")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(guest)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(guestResponse);
-        return extractId(guestResponse);
+        assertEquals(Constants.RESERVATION_NOT_FOUND, excepcion.getMessage());
+        verify(reservationRepository).findById(reservaId);
     }
 
-    private UUID crearReservaParaEliminar(UUID roomId, UUID guestId) throws Exception {
-        ReservationDto reservation = new ReservationDto();
-        reservation.setRoomId(roomId);
-        reservation.setGuestId(guestId);
-        reservation.setCheckIn(LocalDateTime.of(2026, 6, 10, 14, 0));
-        reservation.setCheckOut(LocalDateTime.of(2026, 6, 12, 11, 0));
-        reservation.setGuestsCount(2);
-        reservation.setNotes("Reserva para Eliminar");
+    @Test
+    void huespedConReservaEnElMismoRangoDeFechas() {
+        UUID habitacionId = UUID.randomUUID();
+        UUID huespedId = UUID.randomUUID();
+        ReservationDto reserva = crearReservaDto(habitacionId, huespedId);
 
-        String reservationResponse = mockMvc.perform(post("/reservation")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(reservation)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+        prepararHabitacionYHuespedExistentes(habitacionId, huespedId, true, 4);
+        when(reservationRepository.existsOverlappingReservationForRoom(
+                eq(habitacionId),
+                eq(reserva.getCheckIn()),
+                eq(reserva.getCheckOut()),
+                eq(null)
+        )).thenReturn(false);
+        when(reservationRepository.existsOverlappingReservationForGuest(
+                eq(huespedId),
+                eq(reserva.getCheckIn()),
+                eq(reserva.getCheckOut()),
+                eq(null)
+        )).thenReturn(true);
 
-        imprimirRespuesta(reservationResponse);
-        return extractId(reservationResponse);
+        BusinessRuleException excepcion = assertThrows(
+                BusinessRuleException.class,
+                () -> reservationService.create(reserva)
+        );
+
+        assertEquals(Constants.RESERVATION_OVERLAP_GUEST, excepcion.getMessage());
+        verify(reservationRepository, never()).saveAndFlush(any(ReservationEntity.class));
     }
 
-    private UUID crearHabitacionParaReservaConHuespedOcupado() throws Exception {
-        String unique = String.valueOf(System.nanoTime());
+    private void prepararHabitacionYHuespedExistentes(UUID habitacionId, UUID huespedId, boolean disponible, int capacidad) {
+        RoomEntity habitacion = new RoomEntity();
+        habitacion.setId(habitacionId);
+        habitacion.setAvailable(disponible);
+        habitacion.setMaxGuests(capacidad);
 
-        RoomDto room = new RoomDto();
-        room.setCode("ROOM" + unique);
-        room.setName("Habitacion" + unique);
-        room.setCity("Bogota");
-        room.setMaxGuests(4);
-        room.setNightlyPrice(new BigDecimal("180000"));
-        room.setAvailable(true);
+        GuestEntity huesped = new GuestEntity();
+        huesped.setId(huespedId);
 
-        String roomResponse = mockMvc.perform(post("/room")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(room)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(roomResponse);
-        return extractId(roomResponse);
+        when(roomRepository.findById(habitacionId)).thenReturn(Optional.of(habitacion));
+        when(guestRepository.findById(huespedId)).thenReturn(Optional.of(huesped));
     }
 
-    private UUID crearHuespedParaReservaConHuespedOcupado() throws Exception {
-        String unique = String.valueOf(System.nanoTime());
+    private void prepararSinCrucesDeReserva(ReservationDto reserva, UUID excluirReservaId) {
+        when(reservationRepository.existsOverlappingReservationForRoom(
+                eq(reserva.getRoomId()),
+                eq(reserva.getCheckIn()),
+                eq(reserva.getCheckOut()),
+                eq(excluirReservaId)
+        )).thenReturn(false);
 
-        GuestDto guest = new GuestDto();
-        guest.setIdentification("ID" + unique);
-        guest.setName("Huesped" + unique);
-        guest.setEmail("huesped" + unique + "@example.com");
-
-        String guestResponse = mockMvc.perform(post("/guest")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(guest)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(guestResponse);
-        return extractId(guestResponse);
+        when(reservationRepository.existsOverlappingReservationForGuest(
+                eq(reserva.getGuestId()),
+                eq(reserva.getCheckIn()),
+                eq(reserva.getCheckOut()),
+                eq(excluirReservaId)
+        )).thenReturn(false);
     }
 
-    private UUID crearReservaBaseParaHuespedOcupado(UUID roomId, UUID guestId) throws Exception {
-        ReservationDto reservation = new ReservationDto();
-        reservation.setRoomId(roomId);
-        reservation.setGuestId(guestId);
-        reservation.setCheckIn(LocalDateTime.of(2026, 7, 10, 14, 0));
-        reservation.setCheckOut(LocalDateTime.of(2026, 7, 12, 11, 0));
-        reservation.setGuestsCount(2);
-        reservation.setNotes("Reserva base para validar huesped ocupado");
-
-        String reservationResponse = mockMvc.perform(post("/reservation")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(reservation)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(reservationResponse);
-        return extractId(reservationResponse);
+    private ReservationDto crearReservaDto(UUID habitacionId, UUID huespedId) {
+        ReservationDto reserva = new ReservationDto();
+        reserva.setRoomId(habitacionId);
+        reserva.setGuestId(huespedId);
+        reserva.setCheckIn(LocalDateTime.of(2026, 5, 10, 14, 0));
+        reserva.setCheckOut(LocalDateTime.of(2026, 5, 12, 11, 0));
+        reserva.setGuestsCount(2);
+        reserva.setNotes("Reserva creada desde TDD puro");
+        return reserva;
     }
 
-    private void imprimirRespuesta(String respuesta) {
-        System.out.println("[TDD] " + respuesta);
+    private ReservationEntity crearReservaEntity(UUID id, ReservationDto reserva) {
+        ReservationEntity entity = new ReservationEntity();
+        entity.setId(id);
+        entity.setRoomId(reserva.getRoomId());
+        entity.setGuestId(reserva.getGuestId());
+        entity.setCheckIn(reserva.getCheckIn());
+        entity.setCheckOut(reserva.getCheckOut());
+        entity.setGuestsCount(reserva.getGuestsCount());
+        entity.setNotes(reserva.getNotes());
+        return entity;
     }
 
+    private ModelMapper crearModelMapper() {
+        ModelMapper modelMapper = new ModelMapper();
+        modelMapper.getConfiguration().setPropertyCondition(Conditions.isNotNull());
+        modelMapper.getConfiguration().setMatchingStrategy(MatchingStrategies.STRICT);
+        return modelMapper;
+    }
 }

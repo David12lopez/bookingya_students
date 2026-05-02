@@ -1,125 +1,126 @@
 package com.project.bookingya.tdd;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.modelmapper.Conditions;
+import org.modelmapper.ModelMapper;
+import org.modelmapper.convention.MatchingStrategies;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.bookingya.dtos.RoomDto;
+import com.project.bookingya.entities.RoomEntity;
+import com.project.bookingya.exceptions.EntityExistsException;
+import com.project.bookingya.exceptions.EntityNotExistsException;
+import com.project.bookingya.models.Room;
+import com.project.bookingya.repositories.IRoomRepository;
+import com.project.bookingya.services.RoomService;
 import com.project.bookingya.shared.Constants;
 
-@SpringBootTest
-@AutoConfigureMockMvc
+@ExtendWith(MockitoExtension.class)
 public class HabitacionTddTest {
 
-    @Autowired
-    private MockMvc mockMvc;
+    @Mock
+    private IRoomRepository roomRepository;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private RoomService roomService;
 
-    @Test
-    void crearHabitacionConExito() throws Exception {
-        String unique = String.valueOf(System.currentTimeMillis());
-        // Crear Habitacion
-        RoomDto room = new RoomDto();
-        room.setCode("ROOM" + unique);
-        room.setName("Habitacion" + unique);
-        room.setCity("Bogota");
-        room.setMaxGuests(4);
-        room.setNightlyPrice(new BigDecimal("180000"));
-        room.setAvailable(true);
-
-        String roomResponse = mockMvc.perform(post("/room")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(room)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andExpect(jsonPath("$.code").value("ROOM" + unique))
-                .andExpect(jsonPath("$.name").value("Habitacion" + unique))
-                .andExpect(jsonPath("$.city").value("Bogota"))
-                .andExpect(jsonPath("$.maxGuests").value(4))
-                .andExpect(jsonPath("$.available").value(true))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(roomResponse);
+    @BeforeEach
+    void configurarPrueba() {
+        roomService = new RoomService(roomRepository, crearModelMapper());
     }
 
     @Test
-    void habitacionNoEncontrada() throws Exception {
-        UUID roomId = UUID.randomUUID();
+    void crearHabitacionConExito() {
+        RoomDto habitacion = crearHabitacionDto();
+        RoomEntity habitacionGuardada = crearHabitacionEntity(UUID.randomUUID(), habitacion);
 
-        String roomResponse = mockMvc.perform(get("/room/{id}", roomId)
-                        .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value(Constants.ROOM_NOT_FOUND))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+        when(roomRepository.existsByCode(habitacion.getCode())).thenReturn(false);
+        when(roomRepository.save(any(RoomEntity.class))).thenReturn(habitacionGuardada);
 
-        imprimirRespuesta(roomResponse);
+        Room respuesta = roomService.create(habitacion);
+
+        assertNotNull(respuesta.getId());
+        assertEquals(habitacion.getCode(), respuesta.getCode());
+        assertEquals(habitacion.getName(), respuesta.getName());
+        assertEquals(habitacion.getCity(), respuesta.getCity());
+        assertEquals(habitacion.getMaxGuests(), respuesta.getMaxGuests());
+        assertEquals(habitacion.getNightlyPrice(), respuesta.getNightlyPrice());
+        assertEquals(habitacion.getAvailable(), respuesta.getAvailable());
+
+        verify(roomRepository).existsByCode(habitacion.getCode());
+        verify(roomRepository).save(any(RoomEntity.class));
     }
 
     @Test
-    void habitacionConCodigoDuplicado() throws Exception {
-        String unique = String.valueOf(System.nanoTime());
+    void habitacionNoEncontrada() {
+        UUID habitacionId = UUID.randomUUID();
+        when(roomRepository.findById(habitacionId)).thenReturn(Optional.empty());
 
-        RoomDto room = new RoomDto();
-        room.setCode("ROOM" + unique);
-        room.setName("Habitacion" + unique);
-        room.setCity("Bogota");
-        room.setMaxGuests(4);
-        room.setNightlyPrice(new BigDecimal("180000"));
-        room.setAvailable(true);
+        EntityNotExistsException excepcion = assertThrows(
+                EntityNotExistsException.class,
+                () -> roomService.getById(habitacionId)
+        );
 
-        crearHabitacion(room);
-
-        RoomDto duplicatedRoom = new RoomDto();
-        duplicatedRoom.setCode(room.getCode());
-        duplicatedRoom.setName("HabitacionDuplicada" + unique);
-        duplicatedRoom.setCity("Medellin");
-        duplicatedRoom.setMaxGuests(2);
-        duplicatedRoom.setNightlyPrice(new BigDecimal("150000"));
-        duplicatedRoom.setAvailable(true);
-
-        String roomResponse = mockMvc.perform(post("/room")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(duplicatedRoom)))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value(Constants.ROOM_EXISTS))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(roomResponse);
+        assertEquals(Constants.ROOM_NOT_FOUND, excepcion.getMessage());
+        verify(roomRepository).findById(habitacionId);
     }
 
-    private void crearHabitacion(RoomDto room) throws Exception {
-        String roomResponse = mockMvc.perform(post("/room")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(room)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+    @Test
+    void habitacionConCodigoDuplicado() {
+        RoomDto habitacion = crearHabitacionDto();
+        when(roomRepository.existsByCode(habitacion.getCode())).thenReturn(true);
 
-        imprimirRespuesta(roomResponse);
+        EntityExistsException excepcion = assertThrows(
+                EntityExistsException.class,
+                () -> roomService.create(habitacion)
+        );
+
+        assertEquals(Constants.ROOM_EXISTS, excepcion.getMessage());
+        verify(roomRepository).existsByCode(habitacion.getCode());
+        verify(roomRepository, never()).save(any(RoomEntity.class));
     }
 
-    private void imprimirRespuesta(String respuesta) {
-        System.out.println("[TDD] " + respuesta);
+    private RoomDto crearHabitacionDto() {
+        RoomDto habitacion = new RoomDto();
+        habitacion.setCode("ROOM-TDD");
+        habitacion.setName("Habitacion TDD");
+        habitacion.setCity("Bogota");
+        habitacion.setMaxGuests(4);
+        habitacion.setNightlyPrice(new BigDecimal("180000"));
+        habitacion.setAvailable(true);
+        return habitacion;
+    }
+
+    private RoomEntity crearHabitacionEntity(UUID id, RoomDto habitacion) {
+        RoomEntity entity = new RoomEntity();
+        entity.setId(id);
+        entity.setCode(habitacion.getCode());
+        entity.setName(habitacion.getName());
+        entity.setCity(habitacion.getCity());
+        entity.setMaxGuests(habitacion.getMaxGuests());
+        entity.setNightlyPrice(habitacion.getNightlyPrice());
+        entity.setAvailable(habitacion.getAvailable());
+        return entity;
+    }
+
+    private ModelMapper crearModelMapper() {
+        ModelMapper modelMapper = new ModelMapper();
+        modelMapper.getConfiguration().setPropertyCondition(Conditions.isNotNull());
+        modelMapper.getConfiguration().setMatchingStrategy(MatchingStrategies.STRICT);
+        return modelMapper;
     }
 }

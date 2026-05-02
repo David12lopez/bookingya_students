@@ -1,142 +1,136 @@
 package com.project.bookingya.tdd;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.modelmapper.Conditions;
+import org.modelmapper.ModelMapper;
+import org.modelmapper.convention.MatchingStrategies;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.bookingya.dtos.GuestDto;
+import com.project.bookingya.entities.GuestEntity;
+import com.project.bookingya.exceptions.EntityExistsException;
+import com.project.bookingya.exceptions.EntityNotExistsException;
+import com.project.bookingya.models.Guest;
+import com.project.bookingya.repositories.IGuestRepository;
+import com.project.bookingya.services.GuestService;
 import com.project.bookingya.shared.Constants;
 
-@SpringBootTest
-@AutoConfigureMockMvc
+@ExtendWith(MockitoExtension.class)
 public class HuespedTddTest {
 
-    @Autowired
-    private MockMvc mockMvc;
+    @Mock
+    private IGuestRepository guestRepository;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private GuestService guestService;
 
-    @Test
-    void crearHuespedConExito() throws Exception {
-        String unique = String.valueOf(System.currentTimeMillis());
-
-        //  Crear huesped
-        GuestDto guest = new GuestDto();
-        guest.setIdentification("ID" + unique);
-        guest.setName("Huesped" + unique);
-        guest.setEmail("huesped" + unique + "@example.com");
-
-        String guestResponse = mockMvc.perform(post("/guest")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(guest)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andExpect(jsonPath("$.identification").value("ID" + unique))
-                .andExpect(jsonPath("$.name").value("Huesped" + unique))
-                .andExpect(jsonPath("$.email").value("huesped" + unique + "@example.com"))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(guestResponse);
+    @BeforeEach
+    void configurarPrueba() {
+        guestService = new GuestService(guestRepository, crearModelMapper());
     }
 
     @Test
-    void huespedNoEncontrado() throws Exception {
-        UUID guestId = UUID.randomUUID();
+    void crearHuespedConExito() {
+        GuestDto huesped = crearHuespedDto();
+        GuestEntity huespedGuardado = crearHuespedEntity(UUID.randomUUID(), huesped);
 
-        String guestResponse = mockMvc.perform(get("/guest/{id}", guestId)
-                        .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value(Constants.GUEST_NOT_FOUND))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+        when(guestRepository.existsByIdentification(huesped.getIdentification())).thenReturn(false);
+        when(guestRepository.existsByEmail(huesped.getEmail())).thenReturn(false);
+        when(guestRepository.save(any(GuestEntity.class))).thenReturn(huespedGuardado);
 
-        imprimirRespuesta(guestResponse);
+        Guest respuesta = guestService.create(huesped);
+
+        assertNotNull(respuesta.getId());
+        assertEquals(huesped.getIdentification(), respuesta.getIdentification());
+        assertEquals(huesped.getName(), respuesta.getName());
+        assertEquals(huesped.getEmail(), respuesta.getEmail());
+
+        verify(guestRepository).existsByIdentification(huesped.getIdentification());
+        verify(guestRepository).existsByEmail(huesped.getEmail());
+        verify(guestRepository).save(any(GuestEntity.class));
     }
 
     @Test
-    void huespedConIdentificacionDuplicada() throws Exception {
-        String unique = String.valueOf(System.nanoTime());
+    void huespedConIdentificacionDuplicada() {
+        GuestDto huesped = crearHuespedDto();
+        when(guestRepository.existsByIdentification(huesped.getIdentification())).thenReturn(true);
 
-        GuestDto guest = new GuestDto();
-        guest.setIdentification("ID" + unique);
-        guest.setName("Huesped" + unique);
-        guest.setEmail("huesped" + unique + "@example.com");
+        EntityExistsException excepcion = assertThrows(
+                EntityExistsException.class,
+                () -> guestService.create(huesped)
+        );
 
-        crearHuesped(guest);
-
-        GuestDto duplicatedGuest = new GuestDto();
-        duplicatedGuest.setIdentification(guest.getIdentification());
-        duplicatedGuest.setName("OtroHuesped" + unique);
-        duplicatedGuest.setEmail("otrohuesped" + unique + "@example.com");
-
-        String guestResponse = mockMvc.perform(post("/guest")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(duplicatedGuest)))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value(Constants.GUEST_EXISTS))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(guestResponse);
+        assertEquals(Constants.GUEST_EXISTS, excepcion.getMessage());
+        verify(guestRepository).existsByIdentification(huesped.getIdentification());
+        verify(guestRepository, never()).save(any(GuestEntity.class));
     }
 
     @Test
-    void huespedConCorreoDuplicado() throws Exception {
-        String unique = String.valueOf(System.nanoTime());
+    void huespedConCorreoDuplicado() {
+        GuestDto huesped = crearHuespedDto();
 
-        GuestDto guest = new GuestDto();
-        guest.setIdentification("ID" + unique);
-        guest.setName("Huesped" + unique);
-        guest.setEmail("huesped" + unique + "@example.com");
+        when(guestRepository.existsByIdentification(huesped.getIdentification())).thenReturn(false);
+        when(guestRepository.existsByEmail(huesped.getEmail())).thenReturn(true);
 
-        crearHuesped(guest);
+        EntityExistsException excepcion = assertThrows(
+                EntityExistsException.class,
+                () -> guestService.create(huesped)
+        );
 
-        GuestDto duplicatedGuest = new GuestDto();
-        duplicatedGuest.setIdentification("OTRO" + unique);
-        duplicatedGuest.setName("OtroHuesped" + unique);
-        duplicatedGuest.setEmail(guest.getEmail());
-
-        String guestResponse = mockMvc.perform(post("/guest")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(duplicatedGuest)))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value(Constants.GUEST_EMAIL_EXISTS))
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        imprimirRespuesta(guestResponse);
+        assertEquals(Constants.GUEST_EMAIL_EXISTS, excepcion.getMessage());
+        verify(guestRepository).existsByIdentification(huesped.getIdentification());
+        verify(guestRepository).existsByEmail(huesped.getEmail());
+        verify(guestRepository, never()).save(any(GuestEntity.class));
     }
 
-    private void crearHuesped(GuestDto guest) throws Exception {
-        String guestResponse = mockMvc.perform(post("/guest")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(guest)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").exists())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+    @Test
+    void huespedNoEncontrado() {
+        UUID huespedId = UUID.randomUUID();
+        when(guestRepository.findById(huespedId)).thenReturn(Optional.empty());
 
-        imprimirRespuesta(guestResponse);
+        EntityNotExistsException excepcion = assertThrows(
+                EntityNotExistsException.class,
+                () -> guestService.getById(huespedId)
+        );
+
+        assertEquals(Constants.GUEST_NOT_FOUND, excepcion.getMessage());
+        verify(guestRepository).findById(huespedId);
     }
 
-    private void imprimirRespuesta(String respuesta) {
-        System.out.println("[TDD] " + respuesta);
+    private GuestDto crearHuespedDto() {
+        GuestDto huesped = new GuestDto();
+        huesped.setIdentification("ID-TDD");
+        huesped.setName("Huesped TDD");
+        huesped.setEmail("huesped.tdd@example.com");
+        return huesped;
+    }
+
+    private GuestEntity crearHuespedEntity(UUID id, GuestDto huesped) {
+        GuestEntity entity = new GuestEntity();
+        entity.setId(id);
+        entity.setIdentification(huesped.getIdentification());
+        entity.setName(huesped.getName());
+        entity.setEmail(huesped.getEmail());
+        return entity;
+    }
+
+    private ModelMapper crearModelMapper() {
+        ModelMapper modelMapper = new ModelMapper();
+        modelMapper.getConfiguration().setPropertyCondition(Conditions.isNotNull());
+        modelMapper.getConfiguration().setMatchingStrategy(MatchingStrategies.STRICT);
+        return modelMapper;
     }
 }
