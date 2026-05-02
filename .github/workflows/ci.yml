@@ -9,6 +9,26 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: bookingya
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      HOST_DB: localhost
+      PORT_DB: 5432
+      POSTGRES_DB: bookingya
+      USERNAME_DB: postgres
+      PASSWORD_DB: postgres
 
     steps:
       - uses: actions/checkout@v4
@@ -18,5 +38,12 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: maven
-      - name: Run tests
-        run: mvn -B test --file pom.xml
+      - name: Run TDD and BDD tests
+        run: mvn -B -DargLine="-Xmx512m -XX:TieredStopAtLevel=1" test serenity:aggregate --file pom.xml
+
+      - name: Upload Serenity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serenity-report
+          path: target/site/serenity
